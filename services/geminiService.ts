@@ -40,21 +40,23 @@ const createFormatPrompt = (backgroundColor: string, textColor: string, outputLa
     const fontLink = selectedFont.googleFont.replace(/\s/g, '+');
     
     return `
-Your task is to convert unstructured text into a complete, standards-compliant HTML document. You must follow these rules precisely.
+Your task is to convert unstructured text into a complete, well-structured, and standards-compliant HTML document. You must follow these rules precisely.
 
 **CRITICAL RULES - YOU MUST FOLLOW THESE:**
-1.  **DO NOT CHANGE THE TEXT:** Your only job is to wrap the original text in appropriate HTML tags. You **must not** summarize, rephrase, add, or delete any of the user's original words. The word count of the output's visible text must be identical to the input text.
+1.  **Content Integrity:** Your primary job is to structure and format the user's original text. You **must not** summarize, rephrase, add, or delete any of the user's original words. The word count of the output's visible text must be identical to the input text.
 2.  **Language & Translation:** The final HTML's visible text **must** be in **${outputLanguage}**.
     *   If the input text's language is different from **${outputLanguage}**, you **must** translate it accurately.
     *   If the input text is already in **${outputLanguage}**, you **must** use the text as-is, without any modification or rephrasing.
-3.  **HTML Structure & Markdown Conversion:** You must recognize and convert common Markdown syntax into semantic HTML tags:
-    *   Headings: \`# Heading 1\` -> \`<h1>Heading 1</h1>\`, \`## Heading 2\` -> \`<h2>Heading 2</h2>\`, etc.
-    *   Bold: \`**bold text**\` -> \`<strong>bold text</strong>\`
-    *   Italics: \`*italic text*\` -> \`<em>italic text</em>\`
-    *   Unordered Lists: Lines starting with \`*\`, \`-\`, or \`+\` should be converted into \`<ul>\` and \`<li>\` tags.
-    *   Ordered Lists: Lines starting with \`1.\`, \`2.\`, etc., should be converted into \`<ol>\` and \`<li>\` tags.
-    *   Paragraphs: Separate blocks of text with \`<p>\` tags.
-    Do **NOT** use any inline style attributes for formatting.
+3.  **HTML Structure & Emphasis:** You must analyze the text to identify its semantic structure and add appropriate emphasis.
+    *   **Emphasis:** To improve readability and highlight key information, you **must** identify important terms, concepts, or key phrases within the text and wrap them in \`<strong>\` tags. This is a critical step.
+    *   **Markdown Conversion:** Recognize and convert common Markdown syntax into semantic HTML tags:
+        *   Headings: \`# Heading 1\` -> \`<h1>Heading 1</h1>\`, \`## Heading 2\` -> \`<h2>Heading 2</h2>\`, etc.
+        *   Bold: \`**bold text**\` -> \`<strong>bold text</strong>\` (This should also be used for emphasis).
+        *   Italics: \`*italic text*\` -> \`<em>italic text</em>\`
+        *   Unordered Lists: Lines starting with \`*\`, \`-\`, or \`+\` should be converted into \`<ul>\` and \`<li>\` tags.
+        *   Ordered Lists: Lines starting with \`1.\`, \`2.\`, etc., should be converted into \`<ol>\` and \`<li>\` tags.
+        *   Paragraphs: Separate blocks of text with \`<p>\` tags.
+    *   Do **NOT** use any inline style attributes for formatting. Use semantic tags only.
 4.  **Page Template:** You **must** use the exact \`<head>\` section provided below. Insert the user's content within the \`<body>\` tags.
 
 ---
