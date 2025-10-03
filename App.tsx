@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Header } from './components/Header';
 import { InputPanel } from './components/InputPanel';
 import { OutputPanel } from './components/OutputPanel';
-import { formatTextWithGemini, translateHtmlWithGemini } from './services/geminiService';
+import { formatTextWithGemini, translateHtmlWithGemini, improveTextWithGemini } from './services/geminiService';
 import { FlashcardCreator } from './components/FlashcardCreator';
 
 const MIN_CHUNK_WORDS = 1000;
@@ -129,23 +129,83 @@ const mergeHtmlChunks = (htmlChunks: string[]): string => {
 const App: React.FC = () => {
     const [inputText, setInputText] = useState<string>('');
     const [formattedText, setFormattedText] = useState<string>('');
-    const [backgroundColor, setBackgroundColor] = useState<string>('#ffffff');
+    const [backgroundColor, setBackgroundColor] = useState<string>('#f9fafb'); // gray-50
     const [textColor, setTextColor] = useState<string>('#000000');
-    const [appStatus, setAppStatus] = useState<'idle' | 'formatting' | 'translating'>('idle');
+    const [appStatus, setAppStatus] = useState<'idle' | 'formatting' | 'translating' | 'improving'>('idle');
     const [error, setError] = useState<string | null>(null);
     const [outputLanguage, setOutputLanguage] = useState<'ar' | 'en'>('ar');
     const [processingStatus, setProcessingStatus] = useState<{current: number; total: number} | null>(null);
     const [processingMode, setProcessingMode] = useState<'speed' | 'quality'>('speed');
     const [fontFamily, setFontFamily] = useState<string>('Tajawal');
     const [lineHeight, setLineHeight] = useState<number>(1.8);
-    const [headingColor, setHeadingColor] = useState<string>('#0d6efd');
+    const [headingColor, setHeadingColor] = useState<string>('#2563eb'); // blue-600
     const [view, setView] = useState<'editor' | 'flashcards'>('editor');
-    const [htmlForFlashcards, setHtmlForFlashcards] = useState<string>('');
+    const [sourceContentForFlashcards, setSourceContentForFlashcards] = useState<string>('');
+    const [outputViewMode, setOutputViewMode] = useState<'preview' | 'editor'>('preview');
+    const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
+    useEffect(() => {
+        const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+        setTheme(initialTheme);
+    }, []);
+
+    useEffect(() => {
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+            setBackgroundColor('#111827'); // gray-900
+            setTextColor('#f9fafb'); // gray-50
+        } else {
+            document.documentElement.classList.remove('dark');
+            setBackgroundColor('#f9fafb'); // gray-50
+            setTextColor('#000000'); 
+        }
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
+    const handleToggleTheme = () => {
+        setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
+    };
+
+
+    const handleClearText = useCallback(() => {
+        setInputText('');
+        setFormattedText('');
+        setError(null);
+    }, []);
 
     const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
         setInputText(e.target.value);
     }, []);
+    
+    const handleFormattedTextChange = useCallback((newHtml: string) => {
+        setFormattedText(newHtml);
+    }, []);
+
+
+    const handleImproveText = useCallback(async () => {
+        if (!inputText.trim()) return;
+
+        setAppStatus('improving');
+        setError(null);
+        const originalText = inputText;
+
+        try {
+            let improvedTextResult = '';
+            const stream = improveTextWithGemini(inputText);
+            setInputText(''); // Clear for streaming
+            for await (const chunk of stream) {
+                improvedTextResult += chunk;
+                setInputText(improvedTextResult);
+            }
+        } catch (e) {
+            setInputText(originalText); // Revert on error
+            setError(e instanceof Error ? e.message : 'فشل تحسين النص.');
+        } finally {
+            setAppStatus('idle');
+        }
+    }, [inputText]);
 
     const handleFormat = useCallback(async () => {
         if (!inputText.trim()) {
@@ -225,20 +285,28 @@ const App: React.FC = () => {
         }
     }, [formattedText, outputLanguage]);
 
-    const handleCreateFlashcards = useCallback(() => {
+    const handleCreateFlashcardsFromOutput = useCallback(() => {
         if (formattedText) {
-            setHtmlForFlashcards(formattedText);
+            setSourceContentForFlashcards(formattedText);
             setView('flashcards');
         }
     }, [formattedText]);
     
+    const handleCreateFlashcardsFromInput = useCallback(() => {
+        if (inputText) {
+            setSourceContentForFlashcards(inputText);
+            setView('flashcards');
+        }
+    }, [inputText]);
+    
     const isLoading = appStatus === 'formatting';
     const isTranslating = appStatus === 'translating';
+    const isImproving = appStatus === 'improving';
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans p-4 sm:p-6 lg:p-8 transition-colors duration-300">
             <div className="max-w-7xl mx-auto">
-                <Header />
+                <Header theme={theme} onToggleTheme={handleToggleTheme} />
                 <main className="mt-8">
                     {view === 'editor' ? (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -246,11 +314,15 @@ const App: React.FC = () => {
                                 inputText={inputText}
                                 onInputChange={handleInputChange}
                                 onFormat={handleFormat}
+                                onClearText={handleClearText}
                                 backgroundColor={backgroundColor}
                                 onBackgroundColorChange={setBackgroundColor}
                                 textColor={textColor}
                                 onTextColorChange={setTextColor}
                                 isLoading={isLoading}
+                                isImproving={isImproving}
+                                onImproveText={handleImproveText}
+                                onCreateFlashcards={handleCreateFlashcardsFromInput}
                                 processingStatus={processingStatus}
                                 outputLanguage={outputLanguage}
                                 onOutputLanguageChange={setOutputLanguage}
@@ -265,24 +337,30 @@ const App: React.FC = () => {
                             />
                             <OutputPanel
                                 formattedText={formattedText}
+                                onFormattedTextChange={handleFormattedTextChange}
                                 isLoading={isLoading}
                                 isTranslating={isTranslating}
                                 processingStatus={processingStatus}
                                 error={error}
                                 outputLanguage={outputLanguage}
                                 onTranslate={handleTranslate}
-                                onCreateFlashcards={handleCreateFlashcards}
+                                onCreateFlashcards={handleCreateFlashcardsFromOutput}
+                                outputViewMode={outputViewMode}
+                                onOutputViewModeChange={setOutputViewMode}
                             />
                         </div>
                     ) : (
                         <FlashcardCreator
-                            htmlContent={htmlForFlashcards}
-                            onBack={() => setView('editor')}
+                            sourceContent={sourceContentForFlashcards}
+                            onBack={() => {
+                                setView('editor');
+                                setSourceContentForFlashcards('');
+                            }}
                         />
                     )}
                 </main>
-                <footer className="text-center mt-12 py-4 border-t border-gray-700">
-                    <p className="text-sm text-gray-500">
+                <footer className="text-center mt-12 py-4 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                         أنشئ هذا الموقع بواسطة عمر ابراهيم
                     </p>
                 </footer>

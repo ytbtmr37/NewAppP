@@ -1,9 +1,13 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { generateFlashcardsFromText } from '../services/geminiService';
 import { Flashcard } from './Flashcard';
+import { FlashcardColorPanel } from './FlashcardColorPanel';
 import { DownloadIcon } from './icons/DownloadIcon';
+import { RefreshIcon } from './icons/RefreshIcon';
+import { PaintBrushIcon } from './icons/PaintBrushIcon';
 
-// This utility function can be moved to a shared file if needed elsewhere.
+const isHtml = (str: string): boolean => /<\/?[a-z][\s\S]*>/i.test(str);
+
 const extractTextFromHtml = (html: string): string => {
     if (typeof window === 'undefined') return ''; // Avoid server-side errors
     const tempDiv = document.createElement('div');
@@ -38,10 +42,18 @@ const splitTextIntoChunks = (text: string): string[] => {
 
 
 interface FlashcardCreatorProps {
-    htmlContent: string;
+    sourceContent: string;
     onBack: () => void;
 }
 
+export type ColorSettings = {
+    cardBackground: string;
+    cardText: string;
+    cardBorder: string;
+    easyBadge: string;
+    mediumBadge: string;
+    hardBadge: string;
+};
 type Difficulty = 'easy' | 'medium' | 'hard';
 type FlashcardData = {
     id: string;
@@ -61,7 +73,16 @@ const difficultyLabels: Record<Difficulty, string> = {
     hard: 'صعب',
 };
 
-const generateFlashcardHtml = (cards: FlashcardData[]): string => {
+const getContrastYIQ = (hexcolor: string): string => {
+    hexcolor = hexcolor.replace("#", "");
+    const r = parseInt(hexcolor.substr(0, 2), 16);
+    const g = parseInt(hexcolor.substr(2, 2), 16);
+    const b = parseInt(hexcolor.substr(4, 2), 16);
+    const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+    return (yiq >= 128) ? '#1f2937' : '#ffffff'; // returns black or white
+};
+
+const generateFlashcardHtml = (cards: FlashcardData[], colors: ColorSettings): string => {
     const grouped = {
         hard: cards.filter(c => c.difficulty === 'hard'),
         medium: cards.filter(c => c.difficulty === 'medium'),
@@ -110,19 +131,19 @@ const generateFlashcardHtml = (cards: FlashcardData[]): string => {
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #111827; /* gray-900 */
-            --card-front-bg: #1f2937; /* gray-800 */
-            --card-back-bg: #374151; /* gray-700 */
-            --text-color: #e5e7eb; /* gray-200 */
-            --cyan-color: #22d3ee; /* cyan-400 */
-            --yellow-color: #facc15; /* yellow-400 */
-            --border-color: #4b5563; /* gray-600 */
+            --bg-color: #f9fafb; /* gray-50 */
+            --card-front-bg: ${colors.cardBackground};
+            --card-back-bg: ${colors.cardBackground};
+            --text-color: ${colors.cardText};
+            --cyan-color: #2563eb; /* blue-600 */
+            --yellow-color: #d97706; /* amber-600 */
+            --border-color: ${colors.cardBorder};
             --font-family: 'Tajawal', sans-serif;
         }
         body {
             font-family: var(--font-family);
             background-color: var(--bg-color);
-            color: var(--text-color);
+            color: #000000;
             line-height: 1.6;
             margin: 0;
             padding: 2rem;
@@ -144,7 +165,7 @@ const generateFlashcardHtml = (cards: FlashcardData[]): string => {
             font-size: 1.5rem;
             font-weight: 700;
             color: var(--text-color);
-            border-bottom: 2px solid var(--border-color);
+            border-bottom: 2px solid #e5e7eb;
             padding-bottom: 0.5rem;
             margin-top: 3rem;
             margin-bottom: 1.5rem;
@@ -188,10 +209,11 @@ const generateFlashcardHtml = (cards: FlashcardData[]): string => {
             justify-content: center;
             align-items: center;
             padding: 1.5rem;
-            border: 2px solid var(--border-color);
+            border: 1px solid var(--border-color);
             border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
             box-sizing: border-box;
+            color: var(--text-color);
         }
         .card-front {
             background-color: var(--card-front-bg);
@@ -220,9 +242,9 @@ const generateFlashcardHtml = (cards: FlashcardData[]): string => {
             font-weight: 600;
             border-radius: 9999px;
         }
-        .badge-easy { background-color: #14532d; color: #a7f3d0; } /* green-800/300 */
-        .badge-medium { background-color: #713f12; color: #fde68a; } /* yellow-800/300 */
-        .badge-hard { background-color: #7f1d1d; color: #fecaca; } /* red-800/300 */
+        .badge-easy { background-color: ${colors.easyBadge}; color: ${getContrastYIQ(colors.easyBadge)}; }
+        .badge-medium { background-color: ${colors.mediumBadge}; color: ${getContrastYIQ(colors.mediumBadge)}; }
+        .badge-hard { background-color: ${colors.hardBadge}; color: ${getContrastYIQ(colors.hardBadge)}; }
     </style>
 </head>
 <body>
@@ -252,15 +274,29 @@ const generateFlashcardHtml = (cards: FlashcardData[]): string => {
     `;
 };
 
-export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent, onBack }) => {
+export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ sourceContent, onBack }) => {
     const [flashcards, setFlashcards] = useState<FlashcardData[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [processingStatus, setProcessingStatus] = useState<{ current: number; total: number } | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>('all');
+    const [showColorPanel, setShowColorPanel] = useState<boolean>(false);
+    const [colorSettings, setColorSettings] = useState<ColorSettings>({
+        cardBackground: '#ffffff',
+        cardText: '#000000',
+        cardBorder: '#e5e7eb',
+        easyBadge: '#dcfce7',
+        mediumBadge: '#fef3c7',
+        hardBadge: '#fee2e2',
+    });
 
-    const textContent = useMemo(() => extractTextFromHtml(htmlContent), [htmlContent]);
+    const textContent = useMemo(() => {
+        if (isHtml(sourceContent)) {
+            return extractTextFromHtml(sourceContent);
+        }
+        return sourceContent;
+    }, [sourceContent]);
 
     const handleGenerateFlashcards = useCallback(async () => {
         if (!textContent.trim()) {
@@ -302,14 +338,22 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
         }
     }, [textContent]);
 
-    const handleToggleDone = (id: string) => {
+    const handleToggleDone = useCallback((id: string) => {
         setFlashcards(prev => 
             prev.map(card => card.id === id ? { ...card, isDone: !card.isDone } : card)
         );
-    };
+    }, []);
+
+    const handleUpdateFlashcard = useCallback((id: string, question: string, answer: string) => {
+        setFlashcards(prev =>
+            prev.map(card =>
+                card.id === id ? { ...card, question, answer } : card
+            )
+        );
+    }, []);
 
     const handleDownloadHtml = () => {
-        const htmlString = generateFlashcardHtml(flashcards);
+        const htmlString = generateFlashcardHtml(flashcards, colorSettings);
         const blob = new Blob([htmlString], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -318,6 +362,10 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
         a.click();
         URL.revokeObjectURL(url);
     };
+    
+    const handleColorChange = useCallback((key: keyof ColorSettings, value: string) => {
+        setColorSettings(prev => ({ ...prev, [key]: value }));
+    }, []);
 
     const filteredFlashcards = useMemo(() => {
         let statusFiltered = flashcards;
@@ -346,18 +394,18 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
         if (isLoading) {
              return (
                 <div className="text-center py-10">
-                    <svg className="animate-spin mx-auto h-12 w-12 text-cyan-400 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin mx-auto h-12 w-12 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    <p className="text-lg text-gray-300">جاري إنشاء البطاقات التعليمية بجودة عالية...</p>
+                    <p className="text-lg text-gray-700 dark:text-gray-300">جاري إنشاء البطاقات التعليمية بجودة عالية...</p>
                     {processingStatus && (
                         <div className="mt-4 max-w-md mx-auto">
-                            <p className="text-sm text-gray-400 mb-2">
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
                                 {`جاري معالجة الجزء ${processingStatus.current} من ${processingStatus.total}`}
                             </p>
-                            <div className="w-full bg-gray-700 rounded-full h-2.5">
-                                <div className="bg-cyan-500 h-2.5 rounded-full transition-all duration-300" style={{ width: `${(processingStatus.current / processingStatus.total) * 100}%` }}></div>
+                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                                <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${(processingStatus.current / processingStatus.total) * 100}%` }}></div>
                             </div>
                         </div>
                     )}
@@ -366,7 +414,7 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
         }
 
         if (error) {
-            return <div className="p-4 my-4 text-red-400 bg-red-900/50 rounded-md">{error}</div>;
+            return <div className="p-4 my-4 text-red-800 bg-red-100 rounded-md dark:bg-red-900/50 dark:text-red-300">{error}</div>;
         }
 
         if (flashcards.length > 0) {
@@ -375,9 +423,9 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
                      {difficultyOrder.map(level => (
                         groupedFlashcards[level].length > 0 && (
                             <div key={level} className="mb-12">
-                                <h3 className="text-2xl font-bold text-gray-300 border-b-2 border-gray-700 pb-2 mb-6">
+                                <h3 className="text-2xl font-bold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600 pb-2 mb-6">
                                     {difficultyLabels[level]}
-                                    <span className="text-base font-normal bg-gray-700 text-gray-400 mr-3 px-3 py-1 rounded-full">{groupedFlashcards[level].length}</span>
+                                    <span className="text-base font-normal bg-gray-200 text-gray-700 mr-3 px-3 py-1 rounded-full dark:bg-gray-700 dark:text-gray-300">{groupedFlashcards[level].length}</span>
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {groupedFlashcards[level].map(card => (
@@ -385,6 +433,8 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
                                             key={card.id} 
                                             {...card} 
                                             onToggleDone={() => handleToggleDone(card.id)} 
+                                            onUpdate={(q, a) => handleUpdateFlashcard(card.id, q, a)}
+                                            colorSettings={colorSettings}
                                         />
                                     ))}
                                 </div>
@@ -392,8 +442,8 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
                         )
                     ))}
                     {filteredFlashcards.length === 0 && (
-                        <div className="text-center py-10 bg-gray-800 rounded-lg">
-                             <p className="text-lg text-gray-400">لا توجد بطاقات تطابق الفلتر المحدد.</p>
+                        <div className="text-center py-10 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                             <p className="text-lg text-gray-500 dark:text-gray-400">لا توجد بطاقات تطابق الفلتر المحدد.</p>
                         </div>
                     )}
                 </div>
@@ -405,28 +455,28 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
 
     return (
         <div className="w-full">
-             <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 pb-4 border-b border-gray-700 gap-4">
+             <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 pb-4 border-b border-gray-200 dark:border-gray-700 gap-4">
                  <div>
-                    <h2 className="text-3xl font-bold text-gray-200">منشئ البطاقات التعليمية</h2>
-                    <p className="text-gray-400 mt-1">حوّل محتواك إلى بطاقات تفاعلية للمراجعة.</p>
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white">منشئ البطاقات التعليمية</h2>
+                    <p className="text-gray-600 dark:text-gray-300 mt-1">حوّل محتواك إلى بطاقات تفاعلية للمراجعة.</p>
                  </div>
                 <button
                     onClick={onBack}
-                    className="px-4 py-2 text-sm font-medium text-cyan-300 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors duration-200 self-start sm:self-center"
+                    className="px-4 py-2 text-sm font-medium text-blue-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors duration-200 self-start sm:self-center dark:bg-gray-800 dark:text-blue-400 dark:hover:bg-gray-700"
                 >
                     → العودة إلى المحرر
                 </button>
             </div>
 
             {flashcards.length === 0 && !isLoading && (
-                <div className="text-center bg-gray-800 border-2 border-dashed border-gray-600 rounded-lg p-12">
-                    <p className="text-lg text-gray-400 mb-6">
+                <div className="text-center bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-12">
+                    <p className="text-lg text-gray-600 dark:text-gray-300 mb-6">
                         جاهز لتحويل النص المنسق إلى بطاقات تعليمية شاملة؟
                     </p>
                     <button 
                         onClick={handleGenerateFlashcards}
                         disabled={isLoading}
-                        className="flex items-center justify-center mx-auto gap-3 px-8 py-4 text-xl font-semibold text-white bg-cyan-600 rounded-md hover:bg-cyan-700 disabled:bg-gray-600 transition-all duration-200"
+                        className="flex items-center justify-center mx-auto gap-3 px-8 py-4 text-xl font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:bg-blue-300 transition-all duration-200"
                     >
                         {isLoading ? "جاري الإنشاء..." : "✨ إنشاء البطاقات الآن"}
                     </button>
@@ -434,50 +484,76 @@ export const FlashcardCreator: React.FC<FlashcardCreatorProps> = ({ htmlContent,
             )}
             
             {flashcards.length > 0 && !isLoading && (
-                 <div className="my-6 p-4 bg-gray-800 rounded-lg border border-gray-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-x-6 gap-y-4 flex-wrap">
-                        {/* Status Filter */}
-                        <div className="flex items-center gap-2" role="group" aria-label="فلترة حسب الحالة">
-                            <span className="font-semibold text-gray-300">الحالة:</span>
-                            {(['all', 'active', 'done'] as StatusFilter[]).map(f => (
-                                <button
-                                    key={f}
-                                    onClick={() => setStatusFilter(f)}
-                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                                        statusFilter === f 
-                                        ? 'bg-cyan-600 text-white' 
-                                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                    }`}
-                                >
-                                    {f === 'all' ? `الكل` : f === 'active' ? `النشطة` : `المنجزة`}
-                                </button>
-                            ))}
+                 <div className="my-6 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-x-6 gap-y-4 flex-wrap">
+                            {/* Status Filter */}
+                            <div className="flex items-center gap-2" role="group" aria-label="فلترة حسب الحالة">
+                                <span className="font-semibold text-gray-800 dark:text-gray-200">الحالة:</span>
+                                {(['all', 'active', 'done'] as StatusFilter[]).map(f => (
+                                    <button
+                                        key={f}
+                                        onClick={() => setStatusFilter(f)}
+                                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                                            statusFilter === f 
+                                            ? 'bg-blue-600 text-white dark:bg-blue-500' 
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        {f === 'all' ? `الكل` : f === 'active' ? `النشطة` : `المنجزة`}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Difficulty Filter */}
+                             <div className="flex items-center gap-2" role="group" aria-label="فلترة حسب الصعوبة">
+                                <span className="font-semibold text-gray-800 dark:text-gray-200">الصعوبة:</span>
+                                {(['all', 'easy', 'medium', 'hard'] as DifficultyFilter[]).map(d => (
+                                    <button
+                                        key={d}
+                                        onClick={() => setDifficultyFilter(d)}
+                                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                                            difficultyFilter === d
+                                            ? 'bg-blue-600 text-white dark:bg-blue-500'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        {d === 'all' ? 'الكل' : difficultyLabels[d as Difficulty]}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                        {/* Difficulty Filter */}
-                         <div className="flex items-center gap-2" role="group" aria-label="فلترة حسب الصعوبة">
-                            <span className="font-semibold text-gray-300">الصعوبة:</span>
-                            {(['all', 'easy', 'medium', 'hard'] as DifficultyFilter[]).map(d => (
-                                <button
-                                    key={d}
-                                    onClick={() => setDifficultyFilter(d)}
-                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                                        difficultyFilter === d
-                                        ? 'bg-cyan-600 text-white'
-                                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                    }`}
-                                >
-                                    {d === 'all' ? 'الكل' : difficultyLabels[d as Difficulty]}
-                                </button>
-                            ))}
+                        <div className="flex-shrink-0 flex items-center gap-2 self-start sm:self-auto">
+                             <button
+                                onClick={() => setShowColorPanel(prev => !prev)}
+                                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 ${showColorPanel ? 'bg-blue-600 text-white dark:bg-blue-500' : 'bg-gray-100 text-blue-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-blue-400 dark:hover:bg-gray-600'}`}
+                                title="تخصيص مظهر البطاقات"
+                            >
+                                <PaintBrushIcon />
+                                <span>تخصيص المظهر</span>
+                            </button>
+                            <button
+                                onClick={handleGenerateFlashcards}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors duration-200 dark:bg-gray-700 dark:text-blue-400 dark:hover:bg-gray-600"
+                                title="إنشاء مجموعة جديدة من البطاقات (سيتم استبدال المجموعة الحالية)"
+                            >
+                                <RefreshIcon />
+                                <span>إعادة إنشاء</span>
+                            </button>
+                            <button
+                                onClick={handleDownloadHtml}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors duration-200 dark:bg-gray-700 dark:text-blue-400 dark:hover:bg-gray-600"
+                            >
+                                <DownloadIcon />
+                                <span>تحميل HTML</span>
+                            </button>
                         </div>
                     </div>
-                    <button
-                        onClick={handleDownloadHtml}
-                        className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-medium text-cyan-300 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors duration-200 self-start sm:self-auto"
-                    >
-                        <DownloadIcon />
-                        <span>تحميل HTML</span>
-                    </button>
+                     {showColorPanel && (
+                        <FlashcardColorPanel
+                            colors={colorSettings}
+                            onColorChange={handleColorChange}
+                        />
+                    )}
                 </div>
             )}
 

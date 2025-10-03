@@ -167,6 +167,64 @@ export async function* formatTextWithGemini(text: string, backgroundColor: strin
   }
 };
 
+export async function* improveTextWithGemini(text: string): AsyncGenerator<string, void, undefined> {
+  if (!text.trim()) {
+    return;
+  }
+  try {
+    const prompt = `
+Your role is to function as a highly precise text formatting utility, specializing in scientific and chemical notations.
+Your task is to reformat the provided text based on the following strict rules. You must not alter the core meaning, wording, or length of the original text.
+
+**Formatting Rules:**
+
+1.  **Chemical Formula Subscripts:** Identify chemical formulas and reformat them using Unicode subscript characters for numerical values.
+    *   Example Input: \`H2O\`, \`C6H12O6\`
+    *   Example Output: \`H₂O\`, \`C₆H₁₂O₆\`
+
+2.  **Scientific Notation Superscripts:** Convert caret (\`^\`) notation for exponents into the corresponding Unicode superscript characters. This applies to numbers, signs (\`+\`, \`-\`), and variables.
+    *   Example Input: \`sp^2\`, \`10^-6\`, \`e^-x\`, \`Ca^2+\`
+    *   Example Output: \`sp²\`, \`10⁻⁶\`, \`e⁻ˣ\`, \`Ca²⁺\`
+
+**Critical Directives:**
+
+*   **Content Preservation:** You **must not** add, remove, summarize, or rephrase any of the user's original text. Your only function is to apply the formatting rules above.
+*   **Output Format:** The final output must be **only** the raw, modified text. Do not include any explanations, comments, or markdown formatting like \`\`\` \`.
+
+Now, process the following text:
+---
+${text}
+---
+`;
+
+    const responseStream = await ai.models.generateContentStream({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+            safetySettings,
+            thinkingConfig: { thinkingBudget: 0 } 
+        }
+    });
+
+    for await (const chunk of responseStream) {
+        if (chunk && chunk.text) {
+            yield chunk.text;
+        }
+    }
+  } catch (error) {
+    console.error("Error improving text with Gemini:", error);
+    let errorMessage = "فشل في تحسين النص. يرجى المحاولة مرة أخرى.";
+    if (error instanceof Error) {
+        if (error.message.includes("SAFETY")) {
+            errorMessage = "فشل تحسين المحتوى بسبب قيود السلامة.";
+        } else {
+             errorMessage = `فشل في تحسين النص. التفاصيل: ${error.message}`;
+        }
+    }
+    throw new Error(errorMessage);
+  }
+}
+
 const createTranslatePrompt = (targetLanguage: 'ar' | 'en') => `
 Goal: Translate **only the user-visible text content** within the provided HTML document to **${targetLanguage}**.
 
